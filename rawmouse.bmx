@@ -1,14 +1,16 @@
+'Raw Mouse Input for BMX-NG V1.1
+'~Kippykip
+
 'Include a bunch of Win32 functions
 Extern "Win32"
 	Function RegisterRawInputDevices:Int(pRawInputDevices:Byte Ptr, uiNumDevices:Int, cbSize:Int)="WINBOOL __stdcall RegisterRawInputDevices(PCRAWINPUTDEVICE, UINT, UINT)!"
 	Function GetRawInputData:Int(hRawInput:Byte Ptr, uiCommand:Int, pData:Byte Ptr, pcbSize:Int Ptr, cbSizeHeader:Int)="UINT __stdcall GetRawInputData(HRAWINPUT, UINT, LPVOID, PUINT, UINT)!"
 	Function GetRawInputDeviceList:Int(pRawInputDeviceList:Byte Ptr, puiNumDevices:Int Ptr, cbSize:Int) = "UINT __stdcall GetRawInputDeviceList(PRAWINPUTDEVICELIST, PUINT, UINT)!"
-	Function GetRawInputDeviceInfoA:Int( hDevice:Int, uiCommand:Int, pData:Byte Ptr, pcbSize:Int Ptr)="UINT __stdcall GetRawInputDeviceInfoA(HANDLE, UINT, LPVOID, PUINT)!"
+	Function GetRawInputDeviceInfoA:Int(hDevice:Int, uiCommand:Int, pData:Byte Ptr, pcbSize:Int Ptr) = "UINT __stdcall GetRawInputDeviceInfoA(HANDLE, UINT, LPVOID, PUINT)!"
 End Extern
 
 'Honestly I'm still unsure how the majority of this stuff works.
 'I've just put a bunch of scraps together and got it to work within BMX-NG
-'~Kippykip
 
 'Multiple Keyboards Handling
 'https://www.syntaxbomb.com/index.php/topic,1026.0.html
@@ -16,28 +18,32 @@ End Extern
 'Some code you may find useful.
 'https://mojolabs.nz/posts.php?topic=85660
 
+'WINPROC FIX!
+'Thank you Scaremonger, VERY EPIC!
+'https://www.syntaxbomb.com/index.php/topic,6038.msg347044457.html#msg347044457
+
 Type HID_Devices
 	Global Rid:HID_RAWINPUTDEVICE
-	Global OldWinProc:Int
+	Global OldWinProc:Byte Ptr
 	Const HID_USAGE_PAGE_GENERIC:Int = $1
 	Const HID_USAGE_GENERIC_MOUSE:Int = $2
 	Const RIDEV_INPUTSINK:Int = $100
 	Const RIM_TYPEMOUSE:Int = 0
 	Const RID_INPUT:Int = $10000003
-	Const HID_USAGE_GENERIC_KEYBOARD:Int = $6
-	Const RIM_TYPEKEYBOARD:Int = 1
-	Const RIM_TYPEHID:Int = 2
-	Const RIDI_DEVICENAME:Int = $20000007
-	Const WM_KEYDOWN:Int = $0100
-	Const WM_SYSKEYDOWN:Int = $0104
 	Const WM_INPUT:Int = $00FF
 	
+	Function SetWindowFunc:Byte Ptr(hwnd:Byte Ptr, NewProc:Byte Ptr(hWnd:Byte Ptr, Msg:UInt, WParamx:WParam, LParamx:LParam))
+		Local OldProc:Int = GetWindowLongA(hwnd, GWL_WNDPROC) 'Backup the original WinProc
+		SetWindowLongA(hwnd, GWL_WNDPROC, Int(Byte Ptr NewProc)) 'Change the proc
+		Return OldProc 'Return the old proc
+	EndFunction
+	
+	'Initialise the raw input procedure 
 	Function Init()
 		Rid = New HID_RAWINPUTDEVICE
 		Local hWnd:Byte Ptr = GetActiveWindow()
-		'Hook all devices we need.... or just the mouse in this example.
 		HID_RAWMouse.Register(hWnd)
-		HID_Devices.OldWinProc = SetWindowLongA(hWnd, -4, Int(Byte Ptr(WinProc))) 'HookWinProc
+		OldWinProc = SetWindowFunc(hWnd, HID_WinProc)
 	End Function
 End Type
 
@@ -72,8 +78,9 @@ Type HID_RAWMouse
 	End Function
 End Type
 
-Function WinProc:Int(hWnd:Byte Ptr, Msg:UInt, WParamx:WParam, LParamx:Int) "win32"
-	Select Msg
+'Kind of... perhaps inject a new WinProc
+Function HID_WinProc:Byte Ptr(hWnd:Byte Ptr, Msg:UInt, WParamx:WParam, LParamx:LParam) "win32"
+	Select MSG
 	    Case HID_Devices.WM_INPUT
 			Local dwSize:Int = 40
 			Local Raw:HID_RAWMouse = New HID_RAWMouse
@@ -81,10 +88,13 @@ Function WinProc:Int(hWnd:Byte Ptr, Msg:UInt, WParamx:WParam, LParamx:Int) "win3
 			If Raw.dwType = HID_Devices.RIM_TYPEMOUSE
 				HID_RAWMouse.RawX:+Raw.lLastX
 				HID_RAWMouse.RawY:+Raw.lLastY
-			EndIf				
+			EndIf
 	End Select
-	CallWindowProcA(Byte Ptr(HID_Devices.OldWinProc), hWnd, Msg, WParamx, LParamx)
+	
+	'Go back to the Original WinProc
+	Return CallWindowProcA(HID_Devices.OldWinProc, hWnd, Msg, WParamx, LParamx)
 End Function
+
 
 Rem - Example below!
 
